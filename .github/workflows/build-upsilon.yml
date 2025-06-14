@@ -2,7 +2,7 @@ name: Build Upsilon with ActuarialAI
 
 on:
   push:
-    branches: [ main, master, actuarial-ai-app ]
+    branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -12,11 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+    - name: Checkout current repository
+      uses: actions/checkout@v4
+    
     - name: Checkout Upsilon
       uses: actions/checkout@v4
       with:
-        repository: cabrerairigoyen/Upsilon
-        ref: actuarial-ai-app
+        repository: UpsilonNumworks/Upsilon
         path: Upsilon
     
     - name: Setup Node.js
@@ -40,11 +42,11 @@ jobs:
         emcc --version
         which emcc
     
-    - name: Verify ActuarialAI app
+    - name: Copy ActuarialAI to Upsilon
       run: |
-        ls -la Upsilon/apps/external/
+        mkdir -p Upsilon/apps/external/actuarial_ai/
+        cp -r actuarial_ai_upsilon/* Upsilon/apps/external/actuarial_ai/
         ls -la Upsilon/apps/external/actuarial_ai/
-        cat Upsilon/apps/external/actuarial_ai/README.md
     
     - name: Clean previous builds
       run: |
@@ -91,11 +93,13 @@ jobs:
     runs-on: macos-latest
     
     steps:
+    - name: Checkout current repository
+      uses: actions/checkout@v4
+    
     - name: Checkout Upsilon
       uses: actions/checkout@v4
       with:
-        repository: cabrerairigoyen/Upsilon
-        ref: actuarial-ai-app
+        repository: UpsilonNumworks/Upsilon
         path: Upsilon
     
     - name: Install Xcode Command Line Tools
@@ -103,8 +107,10 @@ jobs:
         sudo xcode-select --install || true
         sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer || true
     
-    - name: Verify ActuarialAI app
+    - name: Copy ActuarialAI to Upsilon
       run: |
+        mkdir -p Upsilon/apps/external/actuarial_ai/
+        cp -r actuarial_ai_upsilon/* Upsilon/apps/external/actuarial_ai/
         ls -la Upsilon/apps/external/actuarial_ai/
     
     - name: Build macOS Simulator
@@ -123,7 +129,6 @@ jobs:
   create-release:
     needs: [build-web-simulator, build-native-simulator]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/actuarial-ai-app'
     
     steps:
     - name: Download Web Simulator
