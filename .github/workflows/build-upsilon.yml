@@ -1,0 +1,192 @@
+name: Build Upsilon with ActuarialAI
+
+on:
+  push:
+    branches: [ main, master, actuarial-ai-app ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-web-simulator:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Upsilon
+      uses: actions/checkout@v4
+      with:
+        repository: cabrerairigoyen/Upsilon
+        ref: actuarial-ai-app
+        path: Upsilon
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential python3 python3-pip
+    
+    - name: Setup Emscripten
+      uses: mymindstorm/setup-emsdk@v14
+      with:
+        version: '3.1.50'
+        actions-cache-folder: 'emsdk-cache'
+    
+    - name: Verify Emscripten
+      run: |
+        emcc --version
+        which emcc
+    
+    - name: Verify ActuarialAI app
+      run: |
+        ls -la Upsilon/apps/external/
+        ls -la Upsilon/apps/external/actuarial_ai/
+        cat Upsilon/apps/external/actuarial_ai/README.md
+    
+    - name: Clean previous builds
+      run: |
+        cd Upsilon
+        make clean || true
+    
+    - name: Build Upsilon Web Simulator
+      run: |
+        cd Upsilon
+        make PLATFORM=simulator TARGET=web OMEGA_USERNAME="CABRERA" -j$(nproc)
+    
+    - name: Verify build output
+      run: |
+        cd Upsilon
+        find . -name "*.zip" -o -name "*.html" -o -name "*.js" | grep -E "(simulator|epsilon)"
+        ls -la output/release/simulator/web/ || echo "Web output not found"
+    
+    - name: Extract simulator
+      run: |
+        cd Upsilon/output/release/simulator/web/
+        if [ -f "simulator.zip" ]; then
+          unzip simulator.zip -d extracted/
+          ls -la extracted/
+        else
+          echo "simulator.zip not found"
+          exit 1
+        fi
+    
+    - name: Upload Web Simulator
+      uses: actions/upload-artifact@v4
+      with:
+        name: upsilon-web-simulator-actuarial-ai
+        path: Upsilon/output/release/simulator/web/
+        retention-days: 30
+    
+    - name: Upload Extracted Simulator
+      uses: actions/upload-artifact@v4
+      with:
+        name: upsilon-simulator-ready-to-use
+        path: Upsilon/output/release/simulator/web/extracted/
+        retention-days: 30
+
+  build-native-simulator:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout Upsilon
+      uses: actions/checkout@v4
+      with:
+        repository: cabrerairigoyen/Upsilon
+        ref: actuarial-ai-app
+        path: Upsilon
+    
+    - name: Install Xcode Command Line Tools
+      run: |
+        sudo xcode-select --install || true
+        sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer || true
+    
+    - name: Verify ActuarialAI app
+      run: |
+        ls -la Upsilon/apps/external/actuarial_ai/
+    
+    - name: Build macOS Simulator
+      run: |
+        cd Upsilon
+        make clean || true
+        make PLATFORM=simulator TARGET=macos OMEGA_USERNAME="CABRERA" -j$(sysctl -n hw.ncpu)
+    
+    - name: Upload macOS Simulator
+      uses: actions/upload-artifact@v4
+      with:
+        name: upsilon-macos-simulator-actuarial-ai
+        path: Upsilon/output/release/simulator/macos/
+        retention-days: 30
+
+  create-release:
+    needs: [build-web-simulator, build-native-simulator]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/actuarial-ai-app'
+    
+    steps:
+    - name: Download Web Simulator
+      uses: actions/download-artifact@v4
+      with:
+        name: upsilon-simulator-ready-to-use
+        path: web-simulator/
+    
+    - name: Download macOS Simulator
+      uses: actions/download-artifact@v4
+      with:
+        name: upsilon-macos-simulator-actuarial-ai
+        path: macos-simulator/
+      continue-on-error: true
+    
+    - name: Create Release Package
+      run: |
+        mkdir -p release-package
+        
+        # Web Simulator
+        if [ -d "web-simulator" ]; then
+          cp -r web-simulator release-package/web-simulator
+          echo "✅ Web simulator included" >> release-package/README.txt
+        fi
+        
+        # macOS Simulator
+        if [ -d "macos-simulator" ]; then
+          cp -r macos-simulator release-package/macos-simulator
+          echo "✅ macOS simulator included" >> release-package/README.txt
+        fi
+        
+        # Create instructions
+        cat > release-package/INSTRUCTIONS.md << 'EOF'
+        # 🧮 ActuarialAI for Upsilon - Release Package
+        
+        ## 🌐 Web Simulator (Recommended)
+        1. Open `web-simulator/epsilon.html` in your browser
+        2. Navigate to: Menu → External → ActuarialAI
+        3. Enjoy your actuarial calculations!
+        
+        ## 🖥️ macOS Simulator (Native)
+        1. Run the executable in `macos-simulator/`
+        2. Navigate to: Menu → External → ActuarialAI
+        
+        ## 📱 Install on Real NumWorks
+        1. Flash Upsilon firmware to your NumWorks
+        2. ActuarialAI will be available in External apps
+        
+        ## 🔧 Features
+        - 💰 Life Insurance Calculations
+        - 📈 Annuity Valuations  
+        - 📊 Mortality Tables
+        - 🔢 Interest Calculations
+        - 🤖 AI-Powered Actuarial Engine
+        
+        Developed by CABRERA
+        EOF
+        
+        ls -la release-package/
+    
+    - name: Upload Release Package
+      uses: actions/upload-artifact@v4
+      with:
+        name: ActuarialAI-Upsilon-Complete-Package
+        path: release-package/
+        retention-days: 90 
