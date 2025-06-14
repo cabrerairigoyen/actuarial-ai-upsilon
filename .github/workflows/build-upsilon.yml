@@ -29,54 +29,120 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential python3 python3-pip
+        sudo apt-get install -y build-essential python3 python3-pip git
     
-    - name: Setup Emscripten
+    - name: Setup Emscripten (without cache to avoid 503 errors)
       uses: mymindstorm/setup-emsdk@v14
       with:
         version: '3.1.50'
-        actions-cache-folder: 'emsdk-cache'
     
     - name: Verify Emscripten
       run: |
         emcc --version
         which emcc
     
-    - name: Copy ActuarialAI to Upsilon
+    - name: Verify ActuarialAI files
       run: |
+        echo "=== ActuarialAI files in repository ==="
+        ls -la actuarial_ai_upsilon/
+        echo "=== Content of main ActuarialAI file ==="
+        head -20 actuarial_ai_upsilon/actuarial_ai_complete.c || echo "File not found"
+    
+    - name: Create proper Upsilon app structure
+      run: |
+        echo "=== Creating Upsilon app structure ==="
         mkdir -p Upsilon/apps/external/actuarial_ai/
+        
+        # Copy all ActuarialAI files
         cp -r actuarial_ai_upsilon/* Upsilon/apps/external/actuarial_ai/
+        
+        # Verify the copy worked
+        echo "=== Files copied to Upsilon ==="
         ls -la Upsilon/apps/external/actuarial_ai/
+        
+        # Check if we have the main source file
+        if [ ! -f "Upsilon/apps/external/actuarial_ai/actuarial_ai_complete.c" ]; then
+          echo "ERROR: Main ActuarialAI source file not found!"
+          exit 1
+        fi
+        
+        # Verify Upsilon structure
+        echo "=== Upsilon apps structure ==="
+        ls -la Upsilon/apps/
+        ls -la Upsilon/apps/external/ || echo "External apps directory not found"
     
-    - name: Clean previous builds
+    - name: Check Upsilon build system
       run: |
         cd Upsilon
-        make clean || true
+        echo "=== Upsilon Makefile check ==="
+        ls -la Makefile || echo "No Makefile found"
+        echo "=== Available make targets ==="
+        make help || echo "No help target available"
+        echo "=== Upsilon build configuration ==="
+        ls -la build/ || echo "No build directory"
     
-    - name: Build Upsilon Web Simulator
+    - name: Clean and prepare build
       run: |
         cd Upsilon
-        make PLATFORM=simulator TARGET=web OMEGA_USERNAME="CABRERA" -j$(nproc)
+        make clean || echo "Clean failed, continuing..."
+        
+    - name: Attempt Upsilon build with detailed logging
+      run: |
+        cd Upsilon
+        echo "=== Starting Upsilon build ==="
+        echo "Build command: make PLATFORM=simulator TARGET=web OMEGA_USERNAME=CABRERA -j2"
+        make PLATFORM=simulator TARGET=web OMEGA_USERNAME="CABRERA" -j2 2>&1 | tee build.log || {
+          echo "=== BUILD FAILED - Showing last 50 lines of build log ==="
+          tail -50 build.log
+          echo "=== BUILD FAILED - Checking for common issues ==="
+          echo "Checking if external apps are properly configured..."
+          find . -name "*.mk" -o -name "*.mak" | head -10
+          exit 1
+        }
     
     - name: Verify build output
       run: |
         cd Upsilon
-        find . -name "*.zip" -o -name "*.html" -o -name "*.js" | grep -E "(simulator|epsilon)"
-        ls -la output/release/simulator/web/ || echo "Web output not found"
+        echo "=== Build output verification ==="
+        find . -name "*.zip" -o -name "*.html" -o -name "*.js" | grep -E "(simulator|epsilon)" || echo "No simulator files found"
+        ls -la output/ || echo "No output directory"
+        ls -la output/release/ || echo "No release directory"
+        ls -la output/release/simulator/ || echo "No simulator directory"
+        ls -la output/release/simulator/web/ || echo "No web simulator directory"
     
-    - name: Extract simulator
+    - name: Package simulator (if build succeeded)
       run: |
-        cd Upsilon/output/release/simulator/web/
-        if [ -f "simulator.zip" ]; then
-          unzip simulator.zip -d extracted/
-          ls -la extracted/
+        cd Upsilon
+        if [ -d "output/release/simulator/web" ]; then
+          echo "=== Packaging web simulator ==="
+          cd output/release/simulator/web/
+          ls -la
+          if [ -f "simulator.zip" ]; then
+            unzip simulator.zip -d extracted/
+            ls -la extracted/
+          elif [ -f "epsilon.html" ]; then
+            mkdir -p extracted/
+            cp -r * extracted/
+          else
+            echo "No simulator files found to package"
+            exit 1
+          fi
         else
-          echo "simulator.zip not found"
+          echo "Build output directory not found"
           exit 1
         fi
     
+    - name: Upload build log (always)
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: build-log-web
+        path: Upsilon/build.log
+        retention-days: 7
+    
     - name: Upload Web Simulator
       uses: actions/upload-artifact@v4
+      if: success()
       with:
         name: upsilon-web-simulator-actuarial-ai
         path: Upsilon/output/release/simulator/web/
@@ -84,51 +150,16 @@ jobs:
     
     - name: Upload Extracted Simulator
       uses: actions/upload-artifact@v4
+      if: success()
       with:
         name: upsilon-simulator-ready-to-use
         path: Upsilon/output/release/simulator/web/extracted/
         retention-days: 30
 
-  build-native-simulator:
-    runs-on: macos-latest
-    
-    steps:
-    - name: Checkout current repository
-      uses: actions/checkout@v4
-    
-    - name: Checkout Upsilon
-      uses: actions/checkout@v4
-      with:
-        repository: UpsilonNumworks/Upsilon
-        path: Upsilon
-    
-    - name: Install Xcode Command Line Tools
-      run: |
-        sudo xcode-select --install || true
-        sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer || true
-    
-    - name: Copy ActuarialAI to Upsilon
-      run: |
-        mkdir -p Upsilon/apps/external/actuarial_ai/
-        cp -r actuarial_ai_upsilon/* Upsilon/apps/external/actuarial_ai/
-        ls -la Upsilon/apps/external/actuarial_ai/
-    
-    - name: Build macOS Simulator
-      run: |
-        cd Upsilon
-        make clean || true
-        make PLATFORM=simulator TARGET=macos OMEGA_USERNAME="CABRERA" -j$(sysctl -n hw.ncpu)
-    
-    - name: Upload macOS Simulator
-      uses: actions/upload-artifact@v4
-      with:
-        name: upsilon-macos-simulator-actuarial-ai
-        path: Upsilon/output/release/simulator/macos/
-        retention-days: 30
-
-  create-release:
-    needs: [build-web-simulator, build-native-simulator]
+  create-simple-package:
+    needs: [build-web-simulator]
     runs-on: ubuntu-latest
+    if: success()
     
     steps:
     - name: Download Web Simulator
@@ -136,13 +167,6 @@ jobs:
       with:
         name: upsilon-simulator-ready-to-use
         path: web-simulator/
-    
-    - name: Download macOS Simulator
-      uses: actions/download-artifact@v4
-      with:
-        name: upsilon-macos-simulator-actuarial-ai
-        path: macos-simulator/
-      continue-on-error: true
     
     - name: Create Release Package
       run: |
@@ -154,28 +178,14 @@ jobs:
           echo "✅ Web simulator included" >> release-package/README.txt
         fi
         
-        # macOS Simulator
-        if [ -d "macos-simulator" ]; then
-          cp -r macos-simulator release-package/macos-simulator
-          echo "✅ macOS simulator included" >> release-package/README.txt
-        fi
-        
         # Create instructions
         cat > release-package/INSTRUCTIONS.md << 'EOF'
         # 🧮 ActuarialAI for Upsilon - Release Package
         
-        ## 🌐 Web Simulator (Recommended)
+        ## 🌐 Web Simulator
         1. Open `web-simulator/epsilon.html` in your browser
         2. Navigate to: Menu → External → ActuarialAI
         3. Enjoy your actuarial calculations!
-        
-        ## 🖥️ macOS Simulator (Native)
-        1. Run the executable in `macos-simulator/`
-        2. Navigate to: Menu → External → ActuarialAI
-        
-        ## 📱 Install on Real NumWorks
-        1. Flash Upsilon firmware to your NumWorks
-        2. ActuarialAI will be available in External apps
         
         ## 🔧 Features
         - 💰 Life Insurance Calculations
