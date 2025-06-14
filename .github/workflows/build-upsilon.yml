@@ -117,12 +117,20 @@ jobs:
       run: |
         cd Upsilon
         echo "=== Starting Upsilon build ==="
-        echo "Build command: make PLATFORM=simulator TARGET=web OMEGA_USERNAME=CABRERA -j2"
+        echo "Build command: make PLATFORM=simulator TARGET=web epsilon.zip -j2"
         
         # Set PKG_CONFIG_PATH to help find freetype2
         export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig:$PKG_CONFIG_PATH"
         
-        make PLATFORM=simulator TARGET=web OMEGA_USERNAME="CABRERA" -j2 2>&1 | tee build.log || {
+        # Try the build and capture exit status
+        set +e  # Don't exit on error immediately
+        make PLATFORM=simulator TARGET=web epsilon.zip -j2 2>&1 | tee build.log
+        BUILD_EXIT_CODE=$?
+        set -e  # Re-enable exit on error
+        
+        echo "=== Build completed with exit code: $BUILD_EXIT_CODE ==="
+        
+        if [ $BUILD_EXIT_CODE -ne 0 ]; then
           echo "=== BUILD FAILED - Showing last 50 lines of build log ==="
           tail -50 build.log
           echo "=== BUILD FAILED - Checking for common issues ==="
@@ -133,61 +141,67 @@ jobs:
           echo "=== Checking submodules ==="
           git submodule status
           exit 1
-        }
+        else
+          echo "=== BUILD SUCCEEDED ==="
+          echo "Checking what files were generated:"
+          find . -name "*epsilon*" -type f 2>/dev/null || echo "No epsilon files found"
+          echo "=== Checking build directory ==="
+          ls -la output/release/simulator/web/ 2>/dev/null || echo "No web simulator directory"
+        fi
     
     - name: Verify build output
       run: |
         cd Upsilon
         echo "=== Build output verification ==="
-        find . -name "*.zip" -o -name "*.html" -o -name "*.js" | grep -E "(simulator|epsilon)" || echo "No simulator files found"
-        echo "=== Files in current directory ==="
-        ls -la *.js *.zip *.html 2>/dev/null || echo "No simulator files in current directory"
-        echo "=== Checking output directories ==="
+        echo "Current working directory: $(pwd)"
+        echo "=== Checking build directory structure ==="
         ls -la output/ || echo "No output directory"
         ls -la output/release/ || echo "No release directory"
         ls -la output/release/simulator/ || echo "No simulator directory"
         ls -la output/release/simulator/web/ || echo "No web simulator directory"
+        echo "=== Searching for epsilon files in build directory ==="
+        find output/ -name "*epsilon*" -type f 2>/dev/null || echo "No epsilon files found in output/"
+        echo "=== Searching for all files in web simulator directory ==="
+        find output/release/simulator/web/ -type f 2>/dev/null || echo "No files in web simulator directory"
+        echo "=== Checking if build actually succeeded ==="
+        echo "Build log tail (last 20 lines):"
+        tail -20 build.log || echo "No build.log found"
     
     - name: Package simulator (if build succeeded)
       run: |
         cd Upsilon
         echo "=== Packaging web simulator ==="
         
-        # Create output directory structure if it doesn't exist
-        mkdir -p output/release/simulator/web/
-        
-        # Check if files are in current directory (which they are based on build log)
-        if [ -f "epsilon.zip" ] && [ -f "epsilon.js" ]; then
-          echo "Found simulator files in current directory"
-          
-          # Copy files to expected output directory
-          cp epsilon.zip output/release/simulator/web/simulator.zip
-          cp epsilon.js output/release/simulator/web/
-          
-          # Copy HTML file if it exists
-          if [ -f "epsilon.html" ]; then
-            cp epsilon.html output/release/simulator/web/
-          fi
+        # Check if files are in the build output directory
+        if [ -f "output/release/simulator/web/epsilon.zip" ]; then
+          echo "Found epsilon.zip in build output directory"
+          cd output/release/simulator/web/
+          ls -la
           
           # Extract the zip file
-          cd output/release/simulator/web/
-          unzip simulator.zip -d extracted/
+          unzip epsilon.zip -d extracted/
+          echo "=== Contents of extracted simulator ==="
           ls -la extracted/
           
-          # Also copy individual files for direct access
-          cp epsilon.js extracted/ 2>/dev/null || echo "epsilon.js already in extracted/"
-          cp epsilon.html extracted/ 2>/dev/null || echo "epsilon.html not found or already in extracted/"
-          
-        elif [ -d "output/release/simulator/web" ] && [ -f "output/release/simulator/web/simulator.zip" ]; then
-          echo "Found simulator files in output directory"
+        elif [ -f "output/release/simulator/web/epsilon.js" ]; then
+          echo "Found epsilon.js in build output directory"
           cd output/release/simulator/web/
-          unzip simulator.zip -d extracted/
+          ls -la
+          
+          # Create extracted directory and copy files
+          mkdir -p extracted/
+          cp epsilon.js extracted/
+          cp *.html extracted/ 2>/dev/null || echo "No HTML files found"
+          cp *.css extracted/ 2>/dev/null || echo "No CSS files found"
+          echo "=== Contents of extracted simulator ==="
           ls -la extracted/
           
         else
-          echo "No simulator files found to package"
-          echo "Current directory contents:"
-          ls -la *.js *.zip *.html 2>/dev/null || echo "No relevant files"
+          echo "No simulator files found in expected build output directory"
+          echo "=== Checking all possible locations ==="
+          find . -name "*epsilon*" -type f 2>/dev/null || echo "No epsilon files found anywhere"
+          echo "=== Directory structure ==="
+          find output/ -type f 2>/dev/null | head -20 || echo "No files in output directory"
           exit 1
         fi
     
