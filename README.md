@@ -513,3 +513,4 @@ NumWorks SAS, Nintendo of America Inc and Casio aren't associated in any shape o
 - NumWorks Epsilon is released under a [CC BY-NC-SA License](https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
 - Omega is released under a [CC BY-NC-SA License](https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
 - Upsilon is released under a [CC BY-NC-SA License](https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
+# ActuarialAI Calculator Build Trigger
